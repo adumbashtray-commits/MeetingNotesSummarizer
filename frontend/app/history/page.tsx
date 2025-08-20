@@ -6,12 +6,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { History as HistoryIcon, FileText, ExternalLink, AlertCircle, ArrowLeft } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { History as HistoryIcon, FileText, ExternalLink, AlertCircle, ArrowLeft, Trash2 } from "lucide-react";
 
 export default function HistoryPage() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [q, setQ] = useState('');
+  const [scope, setScope] = useState<'title' | 'summary' | 'both'>('both');
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<any[] | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -25,6 +31,45 @@ export default function HistoryPage() {
       }
     })();
   }, []);
+
+  // Debounced semantic search
+  useEffect(() => {
+    if (!q.trim()) {
+      setResults(null);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        setSearching(true);
+        const res = await api.searchMeetings(q.trim(), scope, 20);
+        if (!cancelled) setResults(Array.isArray(res) ? res : []);
+      } catch (e: any) {
+        if (!cancelled) setResults([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 300);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [q, scope]);
+
+  async function onDelete(id: string) {
+    if (!id) return;
+    const ok = window.confirm('Delete this summary permanently?');
+    if (!ok) return;
+    try {
+      setDeletingId(id);
+      await api.deleteMeeting(id);
+      // Optimistically remove from both lists
+      setItems(prev => prev.filter(m => m._id !== id));
+      setResults(prev => prev ? prev.filter(m => m._id !== id) : prev);
+    } catch (e: any) {
+      alert(e?.message || 'Failed to delete');
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-muted/30 py-8">
@@ -41,7 +86,7 @@ export default function HistoryPage() {
 
         <Card className="card-gradient hover-lift">
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
               <div className="flex items-center gap-2">
                 <HistoryIcon className="w-6 h-6 text-primary" />
                 <CardTitle className="text-2xl">Saved Summaries</CardTitle>
@@ -49,6 +94,28 @@ export default function HistoryPage() {
               <Badge variant="secondary" className="accent-gradient text-white">{items.length} items</Badge>
             </div>
             <CardDescription className="text-base">Open a summary to view or edit it</CardDescription>
+            <div className="mt-4 flex flex-col md:flex-row gap-3 md:items-center">
+              <Input
+                className="flex-1"
+                placeholder="Search (semantic) e.g. budget discussions"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+              <div className="flex gap-2">
+                <Button
+                  variant={scope==='title' ? 'default' : 'outline'}
+                  onClick={() => setScope('title')}
+                >Title</Button>
+                <Button
+                  variant={scope==='summary' ? 'default' : 'outline'}
+                  onClick={() => setScope('summary')}
+                >Summary</Button>
+                <Button
+                  variant={scope==='both' ? 'default' : 'outline'}
+                  onClick={() => setScope('both')}
+                >Both</Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             {loading && (
@@ -62,7 +129,7 @@ export default function HistoryPage() {
               </div>
             )}
 
-            {!loading && !error && items.length === 0 && (
+            {!loading && !error && items.length === 0 && !results && (
               <div className="p-6 text-center">
                 <p className="text-muted-foreground">No meetings yet. Generate one from the Home page.</p>
                 <div className="mt-4">
@@ -76,7 +143,55 @@ export default function HistoryPage() {
               </div>
             )}
 
-            {items.length > 0 && (
+            {/* Results list */}
+            {results && (
+              <>
+                <div className="flex justify-between items-center mb-2">
+                  <div className="text-sm text-muted-foreground">
+                    {searching ? 'Searching…' : `Found ${results.length} result${results.length===1?'':'s'}`}
+                  </div>
+                </div>
+                <ul className="divide-y divide-border">
+                  {results.map((m) => (
+                    <li key={m._id} className="py-4 flex items-center justify-between">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-1">
+                          <FileText className="w-5 h-5 text-muted-foreground" />
+                        </div>
+                        <div>
+                          <div className="font-medium text-white/90 line-clamp-1">{m.title || 'Untitled Meeting'}</div>
+                          <div className="text-sm text-muted-foreground">{new Date(m.createdAt).toLocaleString()}</div>
+                          {m.summary ? (
+                            <div className="text-xs text-muted-foreground mt-1 line-clamp-2">{m.summary}</div>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Link href={`/meetings/${m._id}`}>
+                          <Button variant="outline" size="sm">
+                            <ExternalLink className="w-4 h-4 mr-2" />
+                            Open
+                          </Button>
+                        </Link>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-destructive border-destructive/50 hover:bg-destructive/10"
+                          onClick={() => onDelete(m._id)}
+                          disabled={deletingId === m._id}
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          {deletingId === m._id ? 'Deleting…' : 'Delete'}
+                        </Button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {/* Default list when not searching */}
+            {!results && items.length > 0 && (
               <ul className="divide-y divide-border">
                 {items.map((m) => (
                   <li key={m._id} className="py-4 flex items-center justify-between">
@@ -96,6 +211,16 @@ export default function HistoryPage() {
                           Open
                         </Button>
                       </Link>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive border-destructive/50 hover:bg-destructive/10"
+                        onClick={() => onDelete(m._id)}
+                        disabled={deletingId === m._id}
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        {deletingId === m._id ? 'Deleting…' : 'Delete'}
+                      </Button>
                     </div>
                   </li>
                 ))}

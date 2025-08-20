@@ -44,11 +44,24 @@ export const api = {
     return handle(res);
   },
 
-  async sendEmail(id: string, to: string[], subject?: string) {
+  async sendEmail(id: string, to: string[], subject?: string, text?: string, html?: string) {
     const res = await fetch(`${BASE}/api/meetings/${id}/email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to, subject }),
+      body: JSON.stringify({ to, subject, text, html }),
+    });
+    return handle(res);
+  },
+
+  async searchMeetings(q: string, scope: 'title' | 'summary' | 'both' = 'both', limit = 10) {
+    const url = `${BASE}/api/meetings/search?q=${encodeURIComponent(q)}&scope=${scope}&limit=${limit}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    return handle(res);
+  },
+
+  async deleteMeeting(id: string) {
+    const res = await fetch(`${BASE}/api/meetings/${id}`, {
+      method: 'DELETE',
     });
     return handle(res);
   },
